@@ -1,4 +1,5 @@
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 
 import java.nio.*;
 
@@ -19,12 +20,14 @@ public class DNSResponse {
     private boolean is_authoritative = false;
     private int response_code = 0;
     private int answer_count = 0;
+    private int ns_count = 0;
+    private int additional_count = 0;
     private String fqdn = new String();
     private short qtype;
     private short qclass;
+    private AnswerResource[] answers;
+    private NSResource[] name_servers;
     private boolean decoded = false;      // Was this response successfully decoded
-    private int nsCount = 0;              // number of nscount response records
-    private int additionalCount = 0;      // number of additional (alternate) response records
 
     // Note you will almost certainly need some additional instance variables.
 
@@ -39,9 +42,24 @@ public class DNSResponse {
 	public DNSResponse (byte[] data, int len) {
         decode_query(data);
 
+        index += 2; // We want to increment past the end of the query
+
+        // Extract answers
+        //Resource r = new Resource(data);
         if(answer_count > 0){
-            index += 2;
-            AnswerResource ans = new AnswerResource(data);
+            answers = new AnswerResource[answer_count];
+            for(int i = 0; i < answer_count; i++) {
+                answers[i] = new AnswerResource(data);
+                answers[i].print_answer();
+            }
+        }
+
+        // Extract name servers
+        if(ns_count > 0){
+            name_servers = new NSResource[ns_count];
+            for(int i = 0; i < answer_count; i++){
+                name_servers[i] = new NSResource(data);
+            }
         }
 
 	    // Extract list of answers, name server, and additional information response 
@@ -85,15 +103,15 @@ public class DNSResponse {
 
         // NS Count
         index = 8;
-        nsCount = buffer.getShort(index);
+        ns_count = buffer.getShort(index);
 
         // Additional record count
         index = 10;
-        additionalCount = buffer.getShort(index);
+        additional_count = buffer.getShort(index);
 
         // QNAME
-        extract_domain(buffer);
-        index = 12; // Reset after using in extract_domain (holy shit this is dumb)
+        index = 12;
+        fqdn = extract_domain(buffer, index);
 
         // QTYPE
         index += fqdn.length() + 2; // Length of address + starting label + terminating 0x00
@@ -104,25 +122,33 @@ public class DNSResponse {
         qclass = buffer.getShort(index);
     }
 
-    private void extract_domain(ByteBuffer domain){
-        index = 12;
+    private String extract_domain(ByteBuffer data, int offset){
         int label;
         char c;
         int i;
+        String top = new String();
+        String domain = new String();
 
-        while(domain.get(index) != 0x00){
+
+        while(data.get(offset) != 0x00){
             i = 0;
-            label = domain.get(index);
+            label = data.get(offset);
+            if((label & 0xc0) == 0xc0){
+                int pointer = (data.getShort(index) & 0x3f);
+                System.out.println(pointer);
+                top = extract_domain(data, pointer);
+            }
             while(i < label){
                 i++;
-                index++;
-                c = (char) domain.get(index);
-                fqdn = fqdn.concat(Character.toString(c));
+                offset++;
+                c = (char) data.get(offset);
+                domain = domain.concat(Character.toString(c));
             }
-            fqdn = fqdn.concat(".");
-            index++;
+            domain = domain.concat(".");
+            domain = domain.concat(top);
+            offset++;
         }
-        fqdn = fqdn.substring(0, fqdn.length() - 1); // Pull the last . off
+        return domain = domain.substring(0, domain.length() - 1); // Pull the last . off
     }
 
 
@@ -130,26 +156,98 @@ public class DNSResponse {
     // You will probably want a methods to extract a compressed FQDN, IP address
     // cname, authoritative DNS servers and other values like the query ID etc.
 
-    public class AnswerResource {
+    public class Resource {
+        protected ByteBuffer buffer;
         private String name = new String();
-        private String type = new String(); // ?
-        private String data_class = new String(); // ?
+        private int pointer;
+        private short resource_type;
+        private short resource_class;
+        protected int ttl;
+        protected short data_length;
+
+        public Resource(byte[] data){
+            buffer = ByteBuffer.wrap(data);
+            decode_resource();
+        }
+
+        private void decode_resource(){
+            //ByteBuffer buffer = ByteBuffer.wrap(data);
+
+            // isPointer?
+            if((buffer.get(index) & 0xc0) == 0xc0){
+                pointer = (buffer.getShort(index) & 0x3f);
+            } else {
+                pointer = buffer.getShort(index);
+            }
+
+            name = extract_domain(buffer, pointer);
+
+            index += 2; // Move past the pointer/label
+
+            // Type
+            resource_type = buffer.getShort(index);
+
+            // Class
+            index += 2;
+            resource_class = buffer.getShort(index);
+
+            // TTL
+            index += 2;
+            ttl = buffer.getInt(index);
+
+            // Data length
+            index += 4; // We grabbed an int before
+            data_length = buffer.getShort(index);
+
+            index += 2; // Last short, everything else is left to subclasses
+        }
+    }
+
+    public class AnswerResource extends Resource {
         private InetAddress ip;
 
         public AnswerResource(byte[] data){
-            decode_answer(data);
+            super(data);
+
+            extract_ip(buffer, index, data_length);
         }
 
-        private void decode_answer(byte[] data){
-            ByteBuffer buffer = ByteBuffer.wrap(data);
-            System.out.println(index);
-            System.out.println(String.format("0x%08x", buffer.get(index)));
-            index++;
-            System.out.println(buffer.get(index));
-            index++;
-            System.out.println(buffer.getShort(index));
+        private void extract_ip(ByteBuffer buffer, int offset, int length){
+            //InetAddress answer = new InetAddress();
+            byte[] address = new byte[length];
+            for(int i = 0; i < data_length; i++){
+                address[i] = buffer.get(offset+i);
+            }
+            try{
+                ip = InetAddress.getByAddress(address);
+            } catch(UnknownHostException e){
+                System.out.println("IP address is malformed");
+            }
+            index = index + length;
+            //return answer;
         }
 
+        private void print_answer(){
+            System.out.println(super.name);
+            System.out.println(super.ttl);
+            System.out.println(ip.getHostAddress());
+        }
+
+    }
+
+    public class NSResource extends Resource {
+        private String name_server = new String();
+
+        public NSResource(byte[] data){
+            super(data);
+
+            extract_nameserver(buffer, index);
+            System.out.println(name_server);
+        }
+
+        private void extract_nameserver(ByteBuffer buffer, int offset){
+            name_server = extract_domain(buffer, offset);
+        }
     }
 
     // You will also want methods to extract the response records and record
