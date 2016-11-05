@@ -7,3 +7,6 @@ run: DNSlookup.jar
 clean:
 	rm -f *.class
 	rm -f DNSlookup.jar
+
+verify: DNSlookup.jar
+	java -jar DNSlookup.jar   142.103.6.6 cs.ubc.ca
