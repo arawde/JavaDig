@@ -52,16 +52,24 @@ public class DNSlookup {
 	private static void lookup(InetAddress root, String domain) throws SocketException, IOException {
         DatagramSocket UDPsocket = new DatagramSocket();
 
-        System.out.println("Encoding query");
+		// This will probably have to become a loop
 
 		byte[] encoded_query = encode(domain);
-
-		System.out.println("Query encoded!");
-
 		DatagramPacket query =
 				new DatagramPacket(encoded_query, encoded_query.length, root, 53);
+
 		UDPsocket.send(query);
-        UDPsocket.close();
+
+		byte[] response_buffer = new byte[512];
+		// Receive a packet
+		DatagramPacket r = new DatagramPacket(response_buffer, response_buffer.length);
+		UDPsocket.receive(r);
+
+		DNSResponse response = new DNSResponse(r.getData(), r.getData().length);
+
+		// End
+
+		UDPsocket.close();
 	}
 
 	private static byte[] encode(String domain){
@@ -70,35 +78,27 @@ public class DNSlookup {
 
 		// Query ID
 		Random r = new Random(); // Let's make a query ID
-		int id = r.nextInt(32768);
-		//String id = Integer.toBinaryString(r.nextInt(8192) + 1); // We don't want an ID of zero
-		byte[] query_id = {(byte) (id &0xff), (byte) ((id >>> 8) &0xff)};
+		int id = r.nextInt(32766)+1;
 
-		buffer.write(query_id, 0, query_id.length);
+		byte[] query_id = {(byte) (id &0xff), (byte) ((id >>> 8) &0xff)};
 
 		// Flags
 		byte flags = (byte) 0x00; // 4.1.1 RFC 1035, we are making a query
-		buffer.write(flags);
 
 		// Response code
 		byte response_code = (byte) 0x00; // Same as above
-		buffer.write(response_code);
 
 		// Query Count
 		byte[] qdcount = {(byte) 0x00, (byte) 0x01}; // One query a ah ah
-		buffer.write(qdcount, 0, qdcount.length);
 
 		// Answer count
 		byte[] ancount = {(byte) 0x00, (byte) 0x00};
-		buffer.write(ancount, 0, ancount.length);
 
 		// Name Server Records
 		byte[] nscount = {(byte) 0x00, (byte) 0x00};
-		buffer.write(nscount, 0, nscount.length);
 
 		// Additional Record Count
 		byte[] arcount = {(byte) 0x00, (byte) 0x00};
-		buffer.write(arcount, 0, arcount.length);
 
 		// QNAME
 		byte[] encodedFQDN = new byte[domain.length() + 1];
@@ -112,25 +112,24 @@ public class DNSlookup {
 			accumulator++;
 		}
 
-		buffer.write(encodedFQDN, 0, encodedFQDN.length);
-
-		// End of QNAME
-		buffer.write((byte) 0x00); // 0 byte indicates end of QNAME
-
 		// QTYPE
 		byte[] qtype = {(byte) 0x00, (byte) 0x01};
-		buffer.write(qtype, 0, qtype.length);
 
 		// QCLASS
 		byte[] qclass = {(byte) 0x00, (byte) 0x01};
+
+		// Build our query
+		buffer.write(query_id, 0, query_id.length);
+		buffer.write(flags);
+		buffer.write(response_code);
+		buffer.write(qdcount, 0, qdcount.length);
+		buffer.write(ancount, 0, ancount.length);
+		buffer.write(nscount, 0, nscount.length);
+		buffer.write(arcount, 0, arcount.length);
+		buffer.write(encodedFQDN, 0, encodedFQDN.length);
+		buffer.write((byte) 0x00); // END QNAME
+		buffer.write(qtype, 0, qtype.length);
 		buffer.write(qclass, 0, qclass.length);
-
-		byte[] b = buffer.toByteArray();
-
-		//System.out.println(buffer.toString());
-		for(int k = 0; k < b.length; k++){
-			System.out.println(String.format("0x%08X", b[k]));
-		}
 
 		return buffer.toByteArray();
 	}
