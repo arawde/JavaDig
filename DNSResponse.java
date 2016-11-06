@@ -27,6 +27,7 @@ public class DNSResponse {
     private short qclass;
     private AnswerResource[] answers;
     private NSResource[] name_servers;
+    private AdditionalResource[] additional_resources;
     private boolean decoded = false;      // Was this response successfully decoded
 
     // Note you will almost certainly need some additional instance variables.
@@ -42,23 +43,41 @@ public class DNSResponse {
 	public DNSResponse (byte[] data, int len) {
         decode_query(data);
 
+        // Error cases
+        if(response_code == 3){
+            System.out.printf("%s %s %s%n", fqdn, -1, "0.0.0.0");
+        }
+        if(response_code != 0){
+            System.out.printf("%s %s %s%n", fqdn, -4, "0.0.0.0");
+        }
+
+
         index += 2; // We want to increment past the end of the query
 
         // Extract answers
-        //Resource r = new Resource(data);
         if(answer_count > 0){
             answers = new AnswerResource[answer_count];
             for(int i = 0; i < answer_count; i++) {
                 answers[i] = new AnswerResource(data);
-                answers[i].print_answer();
+                //answers[i].print_answer();
             }
         }
 
         // Extract name servers
         if(ns_count > 0){
             name_servers = new NSResource[ns_count];
-            for(int i = 0; i < answer_count; i++){
+            for(int i = 0; i < ns_count; i++){
                 name_servers[i] = new NSResource(data);
+                //name_servers[i].print_nameserver();
+            }
+        }
+
+        // Extract additional resources
+        if(additional_count > 0){
+            additional_resources = new AdditionalResource[additional_count];
+            for(int i = 0; i < additional_count; i++){
+                additional_resources[i] = new AdditionalResource(data);
+                additional_resources[i].print_addtional();
             }
         }
 
@@ -126,18 +145,12 @@ public class DNSResponse {
         int label;
         char c;
         int i;
-        String top = new String();
         String domain = new String();
 
 
-        while(data.get(offset) != 0x00){
+        while((data.get(offset) != 0x00) && (0xc0 != (data.get(offset) & 0xc0))){
             i = 0;
             label = data.get(offset);
-            if((label & 0xc0) == 0xc0){
-                int pointer = (data.getShort(index) & 0x3f);
-                System.out.println(pointer);
-                top = extract_domain(data, pointer);
-            }
             while(i < label){
                 i++;
                 offset++;
@@ -145,20 +158,31 @@ public class DNSResponse {
                 domain = domain.concat(Character.toString(c));
             }
             domain = domain.concat(".");
-            domain = domain.concat(top);
             offset++;
         }
-        return domain = domain.substring(0, domain.length() - 1); // Pull the last . off
+        if((data.get(offset) & 0xc0) == 0xc0){
+            domain = domain.concat(extract_domain(data, data.getShort(offset) & 0x3f)); // Last 14 bits we dem boyz
+        }
+        if(data.get(offset) == 0x00){
+            return domain = domain.substring(0, domain.length() -1);
+        }
+        return domain;
     }
 
+    private boolean check_authoritative(){
+        return is_authoritative;
+    }
 
+    private boolean check_response(){
+        return is_response;
+    }
 
     // You will probably want a methods to extract a compressed FQDN, IP address
     // cname, authoritative DNS servers and other values like the query ID etc.
 
     public class Resource {
         protected ByteBuffer buffer;
-        private String name = new String();
+        protected String name = new String();
         private int pointer;
         private short resource_type;
         private short resource_class;
@@ -175,7 +199,7 @@ public class DNSResponse {
 
             // isPointer?
             if((buffer.get(index) & 0xc0) == 0xc0){
-                pointer = (buffer.getShort(index) & 0x3f);
+                pointer = (buffer.getShort(index) & 0x3fff);
             } else {
                 pointer = buffer.getShort(index);
             }
@@ -208,28 +232,26 @@ public class DNSResponse {
 
         public AnswerResource(byte[] data){
             super(data);
-
+            //System.out.println(index);
             extract_ip(buffer, index, data_length);
         }
 
         private void extract_ip(ByteBuffer buffer, int offset, int length){
-            //InetAddress answer = new InetAddress();
             byte[] address = new byte[length];
             for(int i = 0; i < data_length; i++){
                 address[i] = buffer.get(offset+i);
             }
             try{
                 ip = InetAddress.getByAddress(address);
-            } catch(UnknownHostException e){
+            } catch(UnknownHostException e) {
                 System.out.println("IP address is malformed");
             }
             index = index + length;
-            //return answer;
         }
 
         private void print_answer(){
-            System.out.println(super.name);
-            System.out.println(super.ttl);
+            System.out.println(name);
+            System.out.println(ttl);
             System.out.println(ip.getHostAddress());
         }
 
@@ -242,11 +264,29 @@ public class DNSResponse {
             super(data);
 
             extract_nameserver(buffer, index);
-            System.out.println(name_server);
         }
 
         private void extract_nameserver(ByteBuffer buffer, int offset){
             name_server = extract_domain(buffer, offset);
+            index += data_length;
+        }
+
+        private void print_nameserver(){
+            System.out.println(name);
+            System.out.println(ttl);
+            System.out.println(name_server);
+        }
+    }
+
+    public class AdditionalResource extends AnswerResource {
+        public AdditionalResource(byte[] data){
+            super(data);
+        }
+
+        private void print_addtional(){
+            System.out.println(name);
+            System.out.println(ttl);
+            System.out.println(super.ip.getHostAddress());
         }
     }
 
