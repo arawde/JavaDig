@@ -26,7 +26,6 @@ public class DNSlookup {
 	static final int MIN_PERMITTED_ARGUMENT_COUNT = 2;
 	static boolean tracingOn = false;
 	static InetAddress rootNameServer;
-    private int attempts;
     static int id;
     static String url = new String();
 
@@ -51,15 +50,21 @@ public class DNSlookup {
 		}
 		
 		// Start adding code here to initiate the lookup
-	    lookup(rootNameServer, fqdn);
+        try{
+            DatagramSocket socket = new DatagramSocket();
+            lookup(socket, rootNameServer, fqdn, 1);
+        } catch(SocketException e){
+            System.out.println(e);
+        } catch(IOException i){
+            System.out.println(i);
+        }
+	    //lookup(socket, rootNameServer, fqdn);
 	}
 
-	private static void lookup(InetAddress root, String domain) throws SocketException, IOException {
-        url = domain;
-        DatagramSocket UDPsocket = new DatagramSocket();
-		UDPsocket.setSoTimeout(2500); // 5 second timeout exception
-
-		// This will probably have to become a loop
+	private static void lookup(DatagramSocket socket, InetAddress root, String domain, int attempts) throws IOException, SocketException{
+        //DatagramSocket UDPsocket = new DatagramSocket();
+		socket.setSoTimeout(2500); // 5 second timeout exception
+        int timeout = 0;
 
 		byte[] encoded_query = encode(domain);
         byte[] response_buffer = new byte[512]; // This might need to be larger
@@ -68,31 +73,42 @@ public class DNSlookup {
 				new DatagramPacket(encoded_query, encoded_query.length, root, 53);
         DatagramPacket r = new DatagramPacket(response_buffer, response_buffer.length);
 
+        while(!socket.isClosed() && attempts < 30){
+            socket.send(query);
 
-        UDPsocket.send(query);
-        trace();
-        int timeout = 0;
-        while(timeout < 2){
-            try{
-                UDPsocket.receive(r);
-                DNSResponse response = new DNSResponse(r.getData(), r.getData().length);
-                break;
-            } catch(SocketTimeoutException e){
-                timeout++;
-                UDPsocket.send(query);
-                trace();
+            while(timeout < 2){
+                try{
+                    socket.receive(r);
+                    break;
+                } catch(SocketTimeoutException e){
+                    timeout++;
+                    socket.send(query);
+                    trace();
+                }
             }
-        }
-        if(timeout >= 2){
-            System.out.printf("%s %s %s%n", domain, -2, "0.0.0.0");
-        } else {
-            if(tracingOn){
-                System.out.println("DUMP LIKE EXXON VALDEZE");
+            if(timeout >= 2){
+                System.out.printf("%s %s %s%n", domain, -2, "0.0.0.0");
+                socket.close();
+                break;
+            } else {
+                attempts++;
+                DNSResponse response = new DNSResponse(r.getData(), r.getData().length);
+                if(tracingOn){
+                    trace();
+                    response.dumpResponse();
+                }
+                if(response.check_authoritative()){
+                    response.final_answers();
+                    socket.close();
+                    break;
+                } else {
+                    query = new DatagramPacket(encoded_query, encoded_query.length, response.get_nameserver_ip(), 53);
+                }
             }
         }
 
 		// End
-		UDPsocket.close();
+		socket.close();
 	}
 
 	private static byte[] encode(String domain){

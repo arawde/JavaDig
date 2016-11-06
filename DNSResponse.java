@@ -35,6 +35,12 @@ public class DNSResponse {
     // When in trace mode you probably want to dump out all the relevant information in a response
 
 	void dumpResponse() {
+        System.out.printf("%s %d %s %s%n",
+                "Response ID:", queryID, "Authoritative: ", String.valueOf(check_authoritative()));
+
+        print_answers();
+        print_nameservers();
+        print_additional();
 	}
 
     // The constructor: you may want to add additional parameters, but the two shown are 
@@ -60,6 +66,7 @@ public class DNSResponse {
             for(int i = 0; i < answer_count; i++) {
                 answers[i] = new AnswerResource(data);
                 //answers[i].print_answer();
+
             }
         }
 
@@ -77,7 +84,7 @@ public class DNSResponse {
             additional_resources = new AdditionalResource[additional_count];
             for(int i = 0; i < additional_count; i++){
                 additional_resources[i] = new AdditionalResource(data);
-                additional_resources[i].print_addtional();
+                //additional_resources[i].print_addtional();
             }
         }
 
@@ -169,12 +176,53 @@ public class DNSResponse {
         return domain;
     }
 
-    private boolean check_authoritative(){
+    public boolean has_answers(){
+        return (answer_count > 0);
+    }
+
+    public boolean check_authoritative(){
         return is_authoritative;
     }
 
     private boolean check_response(){
         return is_response;
+    }
+
+    public InetAddress get_nameserver_ip(){
+        return additional_resources[0].get_address();
+    }
+
+    public void final_answers(){
+        for(int i = 0; i < answer_count; i++){
+            System.out.printf("%s %d %s%n",
+                    answers[i].get_name(),
+                    answers[i].get_ttl(),
+                    answers[i].get_ip());
+        }
+    }
+
+    public void print_answers(){
+        System.out.printf("  %s %d%n", "Answers", answer_count);
+
+        for(int i = 0; i < answer_count; i++){
+            answers[i].print_answer();
+        }
+    }
+
+    public void print_nameservers(){
+        System.out.printf("  %s %d%n", "Nameservers", ns_count);
+
+        for(int i = 0; i < ns_count; i++){
+            name_servers[i].print_nameserver();
+        }
+    }
+
+    public void print_additional(){
+        System.out.printf("  %s %d%n", "Additional Information", additional_count);
+
+        for(int i = 0; i < additional_count; i++){
+            additional_resources[i].print_additional();
+        }
     }
 
     // You will probably want a methods to extract a compressed FQDN, IP address
@@ -184,8 +232,8 @@ public class DNSResponse {
         protected ByteBuffer buffer;
         protected String name = new String();
         private int pointer;
-        private short resource_type;
-        private short resource_class;
+        protected short resource_type;
+        protected short resource_class;
         protected int ttl;
         protected short data_length;
 
@@ -225,10 +273,14 @@ public class DNSResponse {
 
             index += 2; // Last short, everything else is left to subclasses
         }
+
+        
+
+
     }
 
     public class AnswerResource extends Resource {
-        private InetAddress ip;
+        protected InetAddress ip;
 
         public AnswerResource(byte[] data){
             super(data);
@@ -249,10 +301,21 @@ public class DNSResponse {
             index = index + length;
         }
 
+        private String get_name(){
+            return name;
+        }
+
+        private int get_ttl(){
+            return ttl;
+        }
+
+        private String get_ip(){
+            return ip.getHostAddress();
+        }
+
         private void print_answer(){
-            System.out.println(name);
-            System.out.println(ttl);
-            System.out.println(ip.getHostAddress());
+            System.out.format("      %-30s %-10d %-4s %d\n",
+                    name, ttl, resource_type, resource_class);
         }
 
     }
@@ -272,9 +335,8 @@ public class DNSResponse {
         }
 
         private void print_nameserver(){
-            System.out.println(name);
-            System.out.println(ttl);
-            System.out.println(name_server);
+            System.out.format("      %-30s %-10d %-4s %d\n",
+                    name, ttl, resource_type, resource_class);
         }
     }
 
@@ -283,10 +345,13 @@ public class DNSResponse {
             super(data);
         }
 
-        private void print_addtional(){
-            System.out.println(name);
-            System.out.println(ttl);
-            System.out.println(super.ip.getHostAddress());
+        public InetAddress get_address(){
+            return ip;
+        }
+
+        private void print_additional(){
+            System.out.format("     %-30s %-10d %-4s %d\n",
+                    name, ttl, resource_type, resource_class);
         }
     }
 
