@@ -2,6 +2,7 @@
 import java.net.DatagramSocket;
 import java.net.DatagramPacket;
 import java.net.InetAddress;
+import java.net.SocketTimeoutException;
 
 import java.io.ByteArrayOutputStream;
 import java.util.Random;
@@ -25,6 +26,10 @@ public class DNSlookup {
 	static final int MIN_PERMITTED_ARGUMENT_COUNT = 2;
 	static boolean tracingOn = false;
 	static InetAddress rootNameServer;
+    private int attempts;
+    static int id;
+    static String url = new String();
+
     /**
 	 * @param args
 	 */
@@ -50,25 +55,43 @@ public class DNSlookup {
 	}
 
 	private static void lookup(InetAddress root, String domain) throws SocketException, IOException {
+        url = domain;
         DatagramSocket UDPsocket = new DatagramSocket();
+		UDPsocket.setSoTimeout(2500); // 5 second timeout exception
 
 		// This will probably have to become a loop
 
 		byte[] encoded_query = encode(domain);
+        byte[] response_buffer = new byte[512]; // This might need to be larger
+
 		DatagramPacket query =
 				new DatagramPacket(encoded_query, encoded_query.length, root, 53);
+        DatagramPacket r = new DatagramPacket(response_buffer, response_buffer.length);
 
-		UDPsocket.send(query);
 
-		byte[] response_buffer = new byte[512];
-		// Receive a packet
-		DatagramPacket r = new DatagramPacket(response_buffer, response_buffer.length);
-		UDPsocket.receive(r);
-
-		DNSResponse response = new DNSResponse(r.getData(), r.getData().length);
+        UDPsocket.send(query);
+        trace();
+        int timeout = 0;
+        while(timeout < 2){
+            try{
+                UDPsocket.receive(r);
+                DNSResponse response = new DNSResponse(r.getData(), r.getData().length);
+                break;
+            } catch(SocketTimeoutException e){
+                timeout++;
+                UDPsocket.send(query);
+                trace();
+            }
+        }
+        if(timeout >= 2){
+            System.out.printf("%s %s %s%n", domain, -2, "0.0.0.0");
+        } else {
+            if(tracingOn){
+                System.out.println("DUMP LIKE EXXON VALDEZE");
+            }
+        }
 
 		// End
-
 		UDPsocket.close();
 	}
 
@@ -78,7 +101,7 @@ public class DNSlookup {
 
 		// Query ID
 		Random r = new Random(); // Let's make a query ID
-		int id = r.nextInt(32766)+1;
+		id = r.nextInt(32766)+1;
 
 		byte[] query_id = {(byte) (id &0xff), (byte) ((id >>> 8) &0xff)};
 
@@ -133,6 +156,13 @@ public class DNSlookup {
 
 		return buffer.toByteArray();
 	}
+
+	private static void trace(){
+        if(tracingOn){
+            System.out.printf("%n%n%s     %d %s %s %s%n",
+                    "Query ID", id, url, "-->", rootNameServer.getHostAddress());
+        }
+    }
 
 	private static void usage() {
 		System.out.println("Usage: java -jar DNSlookup.jar rootDNS name [-t]");
