@@ -333,8 +333,11 @@ public class DNSResponse {
         }
 
         private void print_answer(){
-            System.out.format("      %-30s %-10d %-4s %d\n",
-                    name, ttl, resource_type, resource_class);
+            System.out.format("      %-30s %-10d %-4s %s\n",
+                    name,
+                    ttl,
+                    get_type(),
+                    (get_type() == "CNAME") ? get_cname() : get_ip());
         }
     }
 
