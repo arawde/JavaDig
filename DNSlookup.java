@@ -102,7 +102,17 @@ public class DNSlookup {
                     socket.close();
                     break;
                 } else {
-                    query = new DatagramPacket(encoded_query, encoded_query.length, response.get_nameserver_ip(), 53);
+					if(response.check_response()) {
+						/**
+						 * Because of the way the lookup method is written, as well as the way information is retrieved
+						 * from the various record types, when presented with a case like finance.google.ca or any other
+						 * instance wherein we would need to resolve the domain os a nameserver, we have no way to
+						 * effectively do so.
+						 */
+						query = new DatagramPacket(encoded_query, encoded_query.length, response.get_nameserver_ip(), 53);
+					} else {
+						break;
+					}
                 }
             }
         }

@@ -18,6 +18,7 @@ public class DNSResponse {
     private int queryID;
     private boolean is_response = false;
     private boolean is_authoritative = false;
+    private boolean is_cname = false;
     private int response_code = 0;
     private int answer_count = 0;
     private int ns_count = 0;
@@ -57,7 +58,6 @@ public class DNSResponse {
             System.out.printf("%s %s %s%n", fqdn, -4, "0.0.0.0");
         }
 
-
         index += 2; // We want to increment past the end of the query
 
         // Extract answers
@@ -65,8 +65,6 @@ public class DNSResponse {
             answers = new AnswerResource[answer_count];
             for(int i = 0; i < answer_count; i++) {
                 answers[i] = new AnswerResource(data);
-                //answers[i].print_answer();
-
             }
         }
 
@@ -75,7 +73,6 @@ public class DNSResponse {
             name_servers = new NSResource[ns_count];
             for(int i = 0; i < ns_count; i++){
                 name_servers[i] = new NSResource(data);
-                //name_servers[i].print_nameserver();
             }
         }
 
@@ -84,12 +81,8 @@ public class DNSResponse {
             additional_resources = new AdditionalResource[additional_count];
             for(int i = 0; i < additional_count; i++){
                 additional_resources[i] = new AdditionalResource(data);
-                //additional_resources[i].print_addtional();
             }
         }
-
-	    // Extract list of answers, name server, and additional information response 
-	    // records
 	}
 
 	public void decode_query(byte[] response){
@@ -119,7 +112,7 @@ public class DNSResponse {
         if((rc &0x03) == 0x03){
             response_code = -1;
         }
-        if((rc &0x00) != 0x00){ // ?
+        if((rc &0xff) != 0x00){
             response_code = -4;
         }
 
@@ -180,12 +173,16 @@ public class DNSResponse {
         return (answer_count > 0);
     }
 
-    public boolean check_authoritative(){
-        return is_authoritative;
+    public boolean has_additional(){
+        return (additional_count > 0);
     }
 
-    private boolean check_response(){
-        return is_response;
+    public boolean check_authoritative(){
+        return is_authoritative || is_cname;
+    }
+
+    public boolean check_response(){
+        return (response_code == 0);
     }
 
     public InetAddress get_nameserver_ip(){
@@ -197,7 +194,7 @@ public class DNSResponse {
             System.out.printf("%s %d %s%n",
                     answers[i].get_name(),
                     answers[i].get_ttl(),
-                    answers[i].get_ip());
+                    (answers[i].get_type() == "CNAME") ? answers[i].get_cname() : answers[i].get_ip());
         }
     }
 
@@ -274,18 +271,36 @@ public class DNSResponse {
             index += 2; // Last short, everything else is left to subclasses
         }
 
-        
-
-
+        public String get_type(){
+            switch(resource_type){
+                case 1:
+                    return "A";
+                case 2:
+                    return "NS";
+                case 5:
+                    return "CNAME";
+                case 6:
+                    return "SOA";
+                case 28:
+                    return "AAAA";
+                default:
+                    return "A";
+            }
+        }
     }
 
     public class AnswerResource extends Resource {
         protected InetAddress ip;
+        protected String cname;
 
         public AnswerResource(byte[] data){
             super(data);
             //System.out.println(index);
-            extract_ip(buffer, index, data_length);
+            if(super.get_type() == "CNAME"){
+                cname = extract_domain(buffer, index);
+            } else {
+                extract_ip(buffer, index, data_length);
+            }
         }
 
         private void extract_ip(ByteBuffer buffer, int offset, int length){
@@ -305,6 +320,10 @@ public class DNSResponse {
             return name;
         }
 
+        private String get_cname(){
+            return cname;
+        }
+
         private int get_ttl(){
             return ttl;
         }
@@ -317,7 +336,6 @@ public class DNSResponse {
             System.out.format("      %-30s %-10d %-4s %d\n",
                     name, ttl, resource_type, resource_class);
         }
-
     }
 
     public class NSResource extends Resource {
@@ -327,6 +345,9 @@ public class DNSResponse {
             super(data);
 
             extract_nameserver(buffer, index);
+            if(resource_type == 28){
+
+            }
         }
 
         private void extract_nameserver(ByteBuffer buffer, int offset){
@@ -335,8 +356,8 @@ public class DNSResponse {
         }
 
         private void print_nameserver(){
-            System.out.format("      %-30s %-10d %-4s %d\n",
-                    name, ttl, resource_type, resource_class);
+            System.out.format("      %-30s %-10d %-4s %s\n",
+                    name, ttl, get_type(), name_server);
         }
     }
 
@@ -350,8 +371,8 @@ public class DNSResponse {
         }
 
         private void print_additional(){
-            System.out.format("     %-30s %-10d %-4s %d\n",
-                    name, ttl, resource_type, resource_class);
+            System.out.format("      %-30s %-10d %-4s %s\n",
+                    name, ttl, get_type(), super.get_ip());
         }
     }
 
